@@ -1,0 +1,215 @@
+services:
+  ittools:
+    container_name: ittools  
+    image: 'corentinth/it-tools:latest'  
+    ports:
+      - '8001:80'  
+    restart: unless-stopped  
+
+  convertx:
+    container_name: convertx
+    image: 'ghcr.io/c4illin/convertx:latest'
+    restart: unless-stopped
+    volumes:
+      - 'convertx_data:/app/data'
+    environment: # Defaults are listed below. All are optional.
+      - ACCOUNT_REGISTRATION=false # true or false, doesn't matter for the first account (e.g. keep this to false if you only want one account)
+      - JWT_SECRET=aLongAndSecretStringUsedToSignTheJSONWebToken1234 # will use randomUUID() by default
+      - HTTP_ALLOWED=true # setting this to true is unsafe, only set this to true locally
+      - ALLOW_UNAUTHENTICATED=true # allows anyone to use the service without logging in, only set this to true locally
+      - AUTO_DELETE_EVERY_N_HOURS=4 # checks every n hours for files older then n hours and deletes them, set to 0 to disable
+      # - FFMPEG_ARGS=-hwaccel vulkan # additional arguments to pass to ffmpeg
+      # - WEBROOT=/convertx # the root path of the web interface, leave empty to disable
+    ports:
+      - 8002:3000
+
+  stirling-pdf:
+    container_name: stirling-pdf
+    image: 'stirlingtools/stirling-pdf:latest'
+    restart: unless-stopped
+    ports:
+      - '8003:8080'
+    volumes:
+      - 'stirling-training-data:/usr/share/tesseract-ocr/5/tessdata'
+      - 'stirling-configs:/configs'
+      - 'stirling-custom-files:/customFiles/'
+      - 'stirling-logs:/logs/'
+    environment:
+      - SERVICE_FQDN_SPDF_8080
+      - DOCKER_ENABLE_SECURITY=false
+    healthcheck:
+      test: 'curl --fail --silent http://127.0.0.1:8080/api/v1/info/status | grep -q "UP" || exit 1'
+      interval: 5s
+      timeout: 20s
+      retries: 10
+
+
+  excalidraw:
+      container_name: excalidraw
+      image: 'excalidraw/excalidraw:latest'
+      restart: unless-stopped
+      ports:
+          - '8004:80'
+      tty: true
+      stdin_open: true
+
+  cyber-chef:
+    container_name: cyber-chef
+    image: mpepping/cyberchef:latest
+    restart: unless-stopped
+    ports:
+      - "8005:8000"
+
+  librespeed:
+    image: lscr.io/linuxserver/librespeed:latest
+    container_name: librespeed
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - PASSWORD=PASSWORD
+      - CUSTOM_RESULTS=false #optional
+      - DB_TYPE=sqlite #optional
+      - DB_NAME=DB_NAME #optional
+      - DB_HOSTNAME=DB_HOSTNAME #optional
+      - DB_USERNAME=DB_USERNAME #optional
+      - DB_PASSWORD=DB_PASSWORD #optional
+      - DB_PORT=DB_PORT #optional
+      - IPINFO_APIKEY=ACCESS_TOKEN #optional
+    volumes:
+      - 'librespeed:/config'
+    ports:
+      - 8006:80
+    restart: unless-stopped
+
+  drawio:
+    image: jgraph/drawio
+    container_name: drawio
+    restart: unless-stopped
+    ports:
+      - 8007:8080
+      - 8407:8443
+    environment:
+      PUBLIC_DNS: 0.0.0.0
+      ORGANISATION_UNIT: unit
+      ORGANISATION: org
+      CITY: city
+      STATE: state
+      COUNTRY_CODE: country
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://0.0.0.0:8080 || exit 1"]
+      interval: 1m30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  dozzle:
+    container_name: dozzle
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - 8008:8080
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://0.0.0.0:8080 || exit 1"]
+      interval: 1m30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  ollama:
+    volumes:
+      - ollama:/root/.ollama
+    container_name: ollama
+    pull_policy: always
+    tty: true
+    restart: unless-stopped
+    image: ollama/ollama:latest
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  open-webui:
+    build:
+      context: .
+      args:
+        OLLAMA_BASE_URL: '/ollama'
+      dockerfile: Dockerfile
+    image: ghcr.io/open-webui/open-webui:latest
+    container_name: open-webui
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    ports:
+      - '1234:8080'
+    environment:
+      - 'OLLAMA_BASE_URL=http://ollama:11434'
+      - 'WEBUI_SECRET_KEY='
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+  
+  hoarder:
+    image: ghcr.io/hoarder-app/hoarder:${HOARDER_VERSION:-release}
+    restart: unless-stopped
+    volumes:
+      # By default, the data is stored in a docker volume called "data".
+      # If you want to mount a custom directory, change the volume mapping to:
+      # - /path/to/your/directory:/data
+      - hoarder-data:/data
+    ports:
+      - 8009:3000
+    env_file:
+      - .env
+    environment:
+      MEILI_ADDR: http://meilisearch:7700
+      BROWSER_WEB_URL: http://chrome:9222
+      # OPENAI_API_KEY: ...
+
+      # You almost never want to change the value of the DATA_DIR variable.
+      # If you want to mount a custom directory, change the volume mapping above instead.
+      DATA_DIR: /data # DON'T CHANGE THIS
+  chrome:
+    image: gcr.io/zenika-hub/alpine-chrome:123
+    restart: unless-stopped
+    command:
+      - --no-sandbox
+      - --disable-gpu
+      - --disable-dev-shm-usage
+      - --remote-debugging-address=0.0.0.0
+      - --remote-debugging-port=9222
+      - --hide-scrollbars
+  meilisearch:
+    image: getmeili/meilisearch:v1.11.1
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch:/meili_data
+
+
+  
+
+volumes:
+  convertx_data:
+  stirling-training-data:
+  stirling-configs:
+  stirling-custom-files:
+  stirling-logs:
+  librespeed:
+  ollama: {}
+  open-webui: {}
+  hoarder-data: 
+  meilisearch: 
+
+
